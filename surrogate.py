@@ -165,7 +165,7 @@ class rbf:
             [DEFAULT] = 1e-8
             
         smooth : float
-            Tikhinov regularisation parameter, used to smooth the RBF
+            Tikhonov regularisation parameter, used to smooth the RBF
             response or to lesten matrix ill-conditioning.
             If an ill-conditioned matrix is detected, the parameter is 
             automatically increased:
@@ -212,7 +212,7 @@ class rbf:
                   # polynomial order
                   # NOTE: Arbitrary dimensional polynomial currently ignored in function and gradient approximation 
                   'polynomial':-1, 
-                  # smoothness parameter (Tikhinov regularisation)
+                  # smoothness parameter (Tikhonov regularisation)
                   'smooth':0.,
                   # the maximum allowable condition number (if violated, a smoothness parameter is applied / increased)
                   'max_condition':1e16,
@@ -482,6 +482,36 @@ class rbf:
             
             
             
+    def _set_smoothing(self,PHI,iprint=0):     
+        
+        from numpy import eye
+        from numpy.linalg import cond     
+            
+        smooth = self.kwdict['smooth']
+        if smooth is None: smooth = 0.
+        
+        Keye = eye(PHI.shape[0])
+        
+        PHI += smooth*Keye
+        condnr = cond(PHI)
+        
+        smooth_prev = smooth
+        altersmooth = False
+        while condnr > self.kwdict['max_condition']:
+            if smooth<1e-10 : smooth = 1e-11
+            smooth *= 10
+            dsmooth = smooth-smooth_prev
+            smooth_prev = smooth
+            PHI += dsmooth*Keye
+            condnr = cond(PHI)
+            altersmooth = True
+            
+        if altersmooth:
+            if iprint:
+                print('<<  WARNING  >>\n\t\t Altered Tikhonov smoothing to %e \n\t\t Matrix condition number = %e < %e maximum allowed'%(smooth,condnr,self.kwdict['max_condition']))
+            #self.kwdict['smooth'] = smooth
+            
+        return PHI
             
             
             
@@ -490,7 +520,7 @@ class rbf:
             
             
             
-    def _calc_weights(self,**kwargs):
+    def _calc_weights(self,iprint=1,**kwargs):
         '''
         
         calculate the kernel / polynomial weights
@@ -515,35 +545,6 @@ class rbf:
         
         if cond(Cov) > self.kwdict['max_condition']:
             print('<<  WARNING  >>\n\t\t Possible ill conditioning in covariance matrix while calculating kernel weights')
-          
-          
-        # local function to set smoothing parameter / Tikhinov regularisation
-        def set_smoothing(PHI):        
-            
-            smooth = self.kwdict['smooth']
-            if smooth is None: smooth = 0.
-            
-            Keye = eye(self._k)
-            
-            PHI += smooth*Keye
-            condnr = cond(PHI)
-            
-            smooth_prev = smooth
-            altersmooth = False
-            while condnr > self.kwdict['max_condition']:
-                if smooth<1e-10 : smooth = 1e-11
-                smooth *= 10
-                dsmooth = smooth-smooth_prev
-                smooth_prev = smooth
-                PHI += dsmooth*Keye
-                condnr = cond(PHI)
-                altersmooth = True
-                
-            if altersmooth:
-                print('<<  WARNING  >>\n\t\t Altered Tikhinov smoothing to %e \n\t\t Matrix condition number = %e < %e maximum allowed'%(smooth,condnr,self.kwdict['max_condition']))
-                #self.kwdict['smooth'] = smooth
-                
-            return PHI
     
             
             
@@ -559,7 +560,7 @@ class rbf:
             PHI = Cov.T*matrix(Cov)
             f_k = Cov.T*matrix(self.f_i)
             
-            PHI = set_smoothing(PHI)
+            PHI = self._set_smoothing(PHI,iprint=iprint)
             
             if 'least' in self.kwdict['regress_solution'].lower():
                 # set up [PHI]{w_k} = {f_k}  to reprensent least squares regression
@@ -618,7 +619,7 @@ class rbf:
         else:
             # solve directly
             
-            PHI = set_smoothing(matrix(Cov))
+            PHI = self._set_smoothing(matrix(Cov),iprint=iprint)
             
             f_k = matrix(self.f_i)
             #
@@ -728,7 +729,7 @@ class rbf:
             if gradient:
                 xdist = self.x_k - x_new
                 ddxlst = array([-xi/dists for xi in xdist.T])
-                drads = self.df(dists)
+                drads = array([self.df(r) for r in dists])
                 df_comps = array([array(self.w_k).flatten()*array(drads).flatten()*array(dx).flatten() for dx in ddxlst]).T
                 df_comps[isnan(df_comps)]=0.
                 df_comps[isinf(df_comps)]=0.
@@ -763,7 +764,7 @@ class rbf:
         
         
 
-    def cross_validate(self,epsilon=None,bins=None,randomise=False):
+    def cross_validate(self,epsilon=None,bins=None,randomise=False,iprint=0):
         '''
         
     >>  Calculate the cross-validation error for a specific value of
@@ -839,7 +840,7 @@ class rbf:
                 PHI = Cov[randlstuse].T*Cov[randlstuse]
                 f_k = Cov[randlstuse].T*matrix(self.f_i)[randlstuse]
                 
-            PHI += self.kwdict['smooth']*eye(PHI.shape[0])
+            PHI = self._set_smoothing(PHI,iprint=iprint)
             
             w_k = array(linalg.solve(PHI,f_k)).flatten()
             
@@ -867,7 +868,7 @@ class rbf:
     
     
     
-    def log_likelihood(self,epsilon=None):
+    def log_likelihood(self,epsilon=None,iprint=0):
         '''
         
     >>  Calculate the logarithmic likelihood function for a specific value of
@@ -886,30 +887,51 @@ class rbf:
         if epsilon is None:
             epsilon = self.epsilon
             
-        from numpy import abs,matrix,linalg,ones,isnan,isinf,sqrt,pi,exp,log,eye
+        from numpy import abs,matrix,linalg,ones,isnan,isinf,sqrt,pi,exp,log,eye,sign
+        from numpy.linalg import cond
         
         epsilon = abs(epsilon)
         
         n = self._k
         
         Cov = matrix([self.f(r,epsilon) for r in self.radii.flatten()]).reshape(-1,self._k)
-            
+           
+           
         if not self._k == self._m :  # set up [PHI]{w_k} = {f_k}  to reprensent least squares regression
             
             PHI = Cov.T*matrix(Cov)
             f_k = Cov.T*matrix(self.f_i)
             
+            PHI = self._set_smoothing(PHI,iprint=iprint)
+            
+            U,S,V = linalg.svd(PHI, full_matrices=True)
+                
+            Sinv = eye(S.size)/sqrt(S)
+                
+            PHIinv = matmul(V.T,matmul(Sinv,U.T))
+            PHIdet = sum(sqrt(S))
+            
+            f_k = matmul(self.PHIinv,f_k)
+            
         else: # solve directly
             
             PHI = matrix(Cov)
             f_k = matrix(self.f_i)
+                         
+            PHI = self._set_smoothing(PHI,iprint=iprint)
             
-        PHI += self.kwdict['smooth']*eye(n)
+            PHIinv = linalg.inv(PHI)
+            PHIdet = linalg.det(PHI)
+        
         #
-        # invert the matrix
-        PHIinv = linalg.inv(PHI)
-        PHIdet = linalg.det(PHI)
-        #
+        if isnan(PHIdet):
+            Phidet = 1e-10
+        if isinf(PHIdet):
+            Phidet = 1e10
+        if PHIdet<1e-10:
+            PHIdet = 1e-10
+            
+            
         P_f_k  = PHIinv*f_k
         onesv = matrix(ones(n)).T
         oPo = onesv.T*PHIinv*onesv
@@ -926,10 +948,26 @@ class rbf:
         # f_s2
         f_s2 = (f_mod.T*w_k)[0,0]/n
         
+        
+        if isnan(f_s2):
+            f_s2 = 1e-10
+        if isinf(f_s2):
+            f_s2 = 1e10
+        if f_s2<1e-10:
+            f_s2 = 1e-10
+        
         ML0 = 1./(sqrt(PHIdet)*(2*pi*f_s2)**(n/2))
         ML1 = exp(-n/2.)
+        
+        LLE = log(ML0*ML1)
+        
+        if isinf(LLE):
+            LLE = sign(LLE)*1e10
+            
+        if isnan(LLE):
+            LLE = 0
     
-        return log(ML0*ML1)
+        return LLE
     
     
     
@@ -938,7 +976,7 @@ class rbf:
     
     
     
-    def fit(self,using='likelihood',bins=None):
+    def fit(self,using='likelihood',bins=None,iprint=0,opt='golden'):
         '''
         
     >>  Fit the kernel length scale parameter
@@ -964,14 +1002,18 @@ class rbf:
         
         if using=='cross-validate':
             # minimise the cross validation error
-            f_obj = lambda x : self.cross_validate(abs(self.epsilon+x),bins)
+            f_obj = lambda x : self.cross_validate(abs(self.epsilon+x),bins,iprint=iprint)
         else:
             # maximise the log likelihood function
-            f_obj = lambda x : -self.log_likelihood(abs(self.epsilon+x))
+            f_obj = lambda x : -self.log_likelihood(abs(self.epsilon+x),iprint=iprint)
         
-        from scipy.optimize import golden
+        from scipy.optimize import fmin_slsqp,golden
         
-        xopt = golden(f_obj)
+        
+        if opt=='golden':
+            xopt = golden(f_obj)
+        else:
+            xopt = fmin_slsqp(f_obj,0,iprint=iprint)
         
         self.kwdict['epsilon'] = abs(self.epsilon+xopt)
         
