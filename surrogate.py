@@ -749,9 +749,10 @@ class rbf:
                 
                 
                 if gradient:
+                    
                     # also return the gradient of the variance estimate
+                    
                     d_ri = matrix([array(drads).flatten()*array(dx).flatten() for dx in ddxlst]).T
-                    #print(ddxlst.shape)
                     d_ri[isnan(d_ri)]=0.
                     d_ri[isinf(d_ri)]=0.
                     
@@ -762,14 +763,11 @@ class rbf:
                                      array(ri.T*PHI_dvarphi).flatten()-
                                      2*(cor0-self.ones.T*PHIvarphi)[0,0]*
                                      array(self.ones.T*PHI_dvarphi).flatten()/self.oPo[0,0])
-                    
-                    #d_s2 = self.f_s2*(-array(PHIvarphi.T*d_ri).flatten()-
-                    #                 array(ri.T*PHI_dvarphi).flatten())
-                    #
-                    
-                    #d_s2 = array(self.ones.T*PHI_dvarphi).flatten()
+                
                     d_s2[isnan(d_s2)] = 0
                     d_s2[isinf(d_s2)] = 0
+                    
+                    # added the input dimension scalar dependence to the gradient  
                     
                     derr += [d_s2*self.x_sf]
                     
