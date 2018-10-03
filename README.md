@@ -25,7 +25,7 @@ Radial basis function implementation [ Python class ] and tests (benchmark / tes
     The RBF approximated gradient :  d        
                                     --- S(x)
                                      dx
-    and estimated root mean squared error : RMSE ( S(x) ) are also avalable.
+    and estimated uncertainty / variance : ERROR ( S(x) ) are also avalable.
                            
                            
     
