@@ -33,7 +33,7 @@ class rbf:
     The RBF approximated gradient :  d        
                                     --- S(x)
                                      dx
-    and estimated root mean squared error : RMSE ( S(x) ) are also avalable.
+    and variance of the fit / statistical error : ERROR ( S(x) ) are also avalable.
                            
                            
     
@@ -551,8 +551,8 @@ class rbf:
         #
         #
         # CALCULATION
-        # Is the RMSE approximation available?
-        self.rmse_available = True
+        # Is the error / uncertainty approximation available?
+        self.err_available = True
         self.ones = matrix(ones(self._k)).T
         #
         if not self._k ==self._m :
@@ -700,8 +700,8 @@ class rbf:
         
         fx = f_rbf(x)
         fx, dfdx = f_rbf(x, gradient=True)
-        fx, rmse = f_rbf(x, error=True)
-        fx, dfdx, rmse = f_rbf(x, gradient=True, error=True)    
+        fx, err = f_rbf(x, error=True)
+        fx, dfdx, err = f_rbf(x, gradient=True, error=True)    
     
     
         
@@ -713,7 +713,8 @@ class rbf:
         
         f   = []
         df  = []
-        mse = []
+        err = []
+        derr = []
         
         cor0 = self.f(0)
         
@@ -727,13 +728,13 @@ class rbf:
             
             
             if gradient:
-                xdist = self.x_k - x_new
+                #xdist = self.x_k - x_new
                 ddxlst = array([-xi/dists for xi in xdist.T])
                 drads = array([self.df(r) for r in dists])
                 df_comps = array([array(self.w_k).flatten()*array(drads).flatten()*array(dx).flatten() for dx in ddxlst]).T
                 df_comps[isnan(df_comps)]=0.
                 df_comps[isinf(df_comps)]=0.
-                df += [sum(df_comps,0)]
+                df += [sum(df_comps,0)*self.x_sf]
                 
                 
             if error:
@@ -741,17 +742,46 @@ class rbf:
                 ri = matrix(rads).T
                 PHIvarphi = self.PHIinv*ri
                 s2 = self.f_s2*(cor0-ri.T*PHIvarphi+(cor0-self.ones.T*PHIvarphi)**2/self.oPo)[0,0]
+                #
                 if isnan(s2): s2=0
-                mse += [max([s2,0])]
+                err += [max([s2,0])]
+                
+                
+                
+                if gradient:
+                    # also return the gradient of the variance estimate
+                    d_ri = matrix([array(drads).flatten()*array(dx).flatten() for dx in ddxlst]).T
+                    #print(ddxlst.shape)
+                    d_ri[isnan(d_ri)]=0.
+                    d_ri[isinf(d_ri)]=0.
+                    
+                    
+                    PHI_dvarphi = self.PHIinv*d_ri
+                    
+                    d_s2 = self.f_s2*(-array(PHIvarphi.T*d_ri).flatten()-
+                                     array(ri.T*PHI_dvarphi).flatten()-
+                                     2*(cor0-self.ones.T*PHIvarphi)[0,0]*
+                                     array(self.ones.T*PHI_dvarphi).flatten()/self.oPo[0,0])
+                    
+                    #d_s2 = self.f_s2*(-array(PHIvarphi.T*d_ri).flatten()-
+                    #                 array(ri.T*PHI_dvarphi).flatten())
+                    #
+                    
+                    #d_s2 = array(self.ones.T*PHI_dvarphi).flatten()
+                    d_s2[isnan(d_s2)] = 0
+                    d_s2[isinf(d_s2)] = 0
+                    
+                    derr += [d_s2*self.x_sf]
+                    
                 
         if gradient&error:
-            return array(f), array(df), array(mse)   
+            return array(f), array(df), array(err), array(derr)   
         
         if gradient:
             return array(f), array(df)
         
         if error:
-            return array(f), array(mse)
+            return array(f), array(err)
         
         return array(f)
     
